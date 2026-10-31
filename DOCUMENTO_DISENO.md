@@ -66,3 +66,114 @@ stateDiagram-v2
     Solicitada --> Cancelada : Usuario cancela / Expiro tiempo
     Confirmada --> Cancelada : Cancelación con anticipación
 ```
+## 5.3 Diseño de Datos
+
+### 5.3.1 Diagrama de Clases del Dominio
+```mermaid
+classDiagram
+    class Cliente {
+        +String id
+        +String nombre
+        +String telefono
+        +String email
+        +List~Cita~ citas
+    }
+    class Barbero {
+        +String id
+        +String nombre
+        +String especialidad
+        +Turno turno
+        +List~Cita~ citas
+    }
+    class Cita {
+        +String id
+        +DateTime fechaHora
+        +Estado estado
+        +Servicio servicio
+        +Cliente cliente
+        +Barbero barbero
+    }
+    class Servicio {
+        +String id
+        +String nombre
+        +Double precio
+        +Duracion duracion
+    }
+    class Notificacion {
+        +String id
+        +String tipo
+        +String canal
+        +String contenido
+        +Boolean enviada
+    }
+    Cliente "1" *-- "0..*" Cita : agenda
+    Barbero "1" *-- "0..*" Cita : atiende
+    Cita "1" -- "1" Servicio : requiere
+    Cita "1" -- "1" Notificacion : usa para recordatorio
+```
+
+### 5.3.2 Modelo Entidad-Relación
+```mermaid
+erDiagram
+    CLIENTE ||--o{ CITA : agenda
+    BARBERO ||--o{ CITA : atiende
+    SERVICIO }o--|| CITA : forma parte
+    NOTIFICACION }o--|| CITA : relaciona
+
+    CLIENTE {
+        int id PK
+        varchar nombre
+        varchar telefono
+        varchar email
+    }
+    BARBERO {
+        int id PK
+        varchar nombre
+        varchar especialidad
+        varchar turno
+    }
+    CITA {
+        int id PK
+        datetime fechaHora
+        enum estado
+        int idCliente FK
+        int idBarbero FK
+        int idServicio FK
+    }
+    SERVICIO {
+        int id PK
+        varchar nombre
+        double precio
+        int duracion
+    }
+    NOTIFICACION {
+        int id PK
+        varchar tipo
+        varchar canal
+        texto contenido
+        bool enviada
+    }
+```
+
+### 5.3.3 Estructuras de Intercambio (DTO / JSON)
+
+#### Solicitud de agendamiento de cita (cliente -> API)
+```json
+{
+  "clienteId": "C001",
+  "barberoId": "B005",
+  "servicioId": "S003",
+  "fechaHora": "2024-03-15T14:30:00",
+  "tipoRecordatorio": "24h_y_1h"
+}
+```
+
+#### Payload JSON API Twilio (para confirmación de cita)
+```json
+{
+  "to": "+5491123456789",
+  "body": "Hola María! Tu cita de corte y barba está confirmada para el 15/03 a las 14:30 con el barbero Juan. Te esperamos! 💈",
+  "from": "+15017122661",
+  "statusCallback": "https://barberflow.com/webhook/twilio"
+}
+```
