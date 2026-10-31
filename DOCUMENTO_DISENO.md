@@ -48,3 +48,21 @@ El rendimiento es crucial para garantizar una experiencia de usuario fluida. La 
 
 ### 5.2.4 Interoperabilidad
 La interoperabilidad es necesaria para la integración externa obligatoria con la API de Twilio y para garantizar que el sistema funcione en diferentes ecosistemas. La justificación técnica se basa en que: (1) la integración con Twilio API requiere adherencia a especificaciones RESTful y manejo correcto de webhooks; (2) el sistema debe comunicarse con servicios externos de manera segura y confiable; (3) compatibilidad con múltiples dispositivos y sistemas operativos asegura que tanto clientes como barberos accedan desde sus plataformas preferidas. Se implementarán estándares API abiertos y documentación clara para futuras integraciones.
+
+## 5.3 Formalización de Reglas de Negocio y Ciclo de Vida de la Cita
+
+### 5.3.1 Reglas de Negocio (RN)
+- **RN1**: Restricción de horario duplicado - Un cliente no puede agendar dos citas en la misma franja horaria.
+- **RN2**: Cancelación previa de 2h - Las cancelaciones deben realizarse con al menos 2 horas de anticipación para no incurrir en penalizaciones.
+- **RN3**: Validación de turno del barbero - No se permite asignar una cita a un barbero que no esté en su turno laboral programado.
+
+### 5.3.2 Ciclo de Vida de la Cita (Diagrama de Estados Mermaid.js)
+```mermaid
+stateDiagram-v2
+    [*] --> Solicitada
+    Solicitada --> Confirmada : Notificación enviada
+    Confirmada --> EnAtencion : Cliente llega a la barbería
+    EnAtencion --> Finalizada : Servicio completado
+    Solicitada --> Cancelada : Usuario cancela / Expiro tiempo
+    Confirmada --> Cancelada : Cancelación con anticipación
+```
