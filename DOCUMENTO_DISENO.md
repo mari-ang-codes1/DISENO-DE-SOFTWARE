@@ -177,3 +177,99 @@ erDiagram
   "statusCallback": "https://barberflow.com/webhook/twilio"
 }
 ```
+
+## 5.4 Diseño Arquitectónico
+
+### 5.4.1 Análisis Comparativo de Alternativas Arquitectónicas
+
+| Aspecto | Monolito MVC | Arquitectura Cliente-Servidor Desacoplada |
+|---------|--------------|------------------------------------------|
+| **Estructura** | Lógica de negocio, vista y datos en una sola unidad | Frontend (Web/Móvil) separado del backend/API |
+| **Despliegue** | Single deployment unit | Desplegable independiente de componentes |
+| **Escalabilidad** | Escalado vertical limitado | Escalado horizontal de servicios individuales |
+| **Maintenance** | Cambios afectan todo el sistema | Modificaciones aisladas por capas |
+| **Tecnología** | Generalmente un solo stack | Flexibilidad para usar diferentes tech stacks |
+
+### 5.4.2 Justificación Técnica de la Selección
+
+Se seleccionó la arquitectura **Cliente-Servidor Desacoplada** por las siguientes razones técnicas:
+
+1. **Acceso desde dispositivos móviles**: La separación del frontend permite desarrollar una interfaz optimizada para móvil (responsive design, PWA) sin restricciones del backend. Los clientes pueden acceder desde teléfonos, tablets o navegadores desktop con la misma API subyacente.
+
+2. **Escalabilidad**: La arquitectura permite escalar Independientemente los componentes. Durante horas pico de reserva (mañanas/lunes), se puede escalar solo el servicio de API o la base de datos sin necesidad de replicar todo el monolito. Esto es crítico para BarberFlow que debe manejar picos de demanda.
+
+3. **Integración de servicios de terceros**: La arquitectura desacoplada facilita la integración con APIs externas como Twilio (WhatsApp), servicios de pago, y sistemas de terceros. Cada integración es un servicio independiente que consuma la API REST sin afectar el resto del sistema.
+
+4. **Desarrollo paralelo**: Los equipos pueden trabajar en el frontend (experiencia de usuario) y backend (lógica de negocio) de forma simultánea y independiente, acelerando el tiempo de mercado.
+
+### 5.4.3 Descarte de la Opción Monolítica
+
+La arquitectura Monolito MVC fue descartada por las siguientes razones:
+
+- **Limitaciones de movilidad**: Un monolito tradicional está diseñado típicamente para navegadores web desktop, lo que dificulta la creación de una experiencia de usuario fluida en dispositivos móviles sin comprometer el rendimiento.
+
+- **Acoplamiento estrecho**: Cualquier cambio en la lógica de negocio o en la base de datos requiere despliegue completo del sistema, aumentando el riesgo de errores en producción y tiempo de inactividad.
+
+- **Escalabilidad ineficiente**: Para escalar, es necesario replicar toda la aplicación (incluyendo controladores y vistas) en lugar de escalar solo los componentes críticos (procesamiento de citas, notificaciones, etc.).
+
+- **Integración compleja**: La incorporación de servicios externos como Twiary API requiere modificaciones directas en el código del monolito, aumentando la complejidad y el riesgo de romper funcionalidades existentes.
+
+### 5.4.4 Diagrama de Arquitectura Seleccionada
+```mermaid
+graph TD
+    subgraph Frontend
+        direction BT
+        Web["Interfaz Web"] 
+        Móvil["App Móvil / PWA"]
+    end
+    
+    subgraph API["API Gateway / REST Service"]
+        direction BT
+        Citas["/api/citas"]
+        Servicios["/api/servicios"]
+        Notificaciones["/api/notificaciones"]
+        Usuarios["/api/usuarios"]
+    end
+    
+    subgraph Servicios["Servicios Internos"]
+        direction BT
+        LógicaNegocio["Lógica de Negocio"]
+        Validación["Validación de Reglas"]
+        GestiónAgenda["Gestión de Agenda"]
+    end
+    
+    subgraph BD["Base de Datos Relacional"]
+        direction BT
+        CitasDB["Tabla Citas"]
+        BarberosDB["Tabla Barbero"]
+        ServiciosDB["Tabla Servicio"]
+    end
+    
+    subgraph WhatsApp["Servicio Externo WhatsApp (Twilio)"]
+        direction BT
+        NotifAPI["Twilio API"]
+    end
+    
+    Web -->|HTTP Request| API
+    Móvil -->|HTTP Request| API
+    API -->|Validación y Lógica| Servicios
+    Servicios -->|Persistencia| BD
+    API -->|Enviar notificaciones| WhatsApp
+    style Frontend fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    style API fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
+    style Servicios fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    style BD fill:#f1f8e9,stroke:#43a047,stroke-width:2px
+    style WhatsApp fill:#eceff1,stroke:#607d8b,stroke-width:2px
+```
+
+### 5.4.5 Riesgos Técnicos y Trade-offs
+
+| Riesgo | Descripción | Mitigación |
+|--------|-------------|------------|
+| **Latencia de red** | La comunicación entre capa cliente y API introduce latencia adicional comparado con monolito local. | Uso de caché estratégico (Redis), optimización de queries, y despliegue de API en regiones geográficas cercanas a los usuarios. |
+| **Complejidad operativa** | Más componentes para monitorear, desplegar y mantener (servers, databases, APIs). | Implementación de DevOps con CI/CD automatizado, uso de contenedores (Docker) y orquestación (Kubernetes). |
+| **Consistencia de datos** | La eventual consistency en distribuciones descentralizadas puede causar discrepancias temporales. | Diseño de transacciones con patrón Saga, y estrategias de resolución de conflictos bien definidas. |
+| **Costos de infraestructura** | Necesidad de servidores adicionales para la capa API y servicios de mensajería. | Evaluación de provedores cloud con modelos pay-per-use, optimización de recursos durante horas valle. |
+| **Costo de desarrollo inicial** | Requiere más tiempo de diseño y configuración inicial. | Prototipado rápido, uso de frameworks (Node.js/Express, Django, Spring Boot) que facilitan la creación rápida de APIs. |
+
+**Trade-offs aceptados:** Se compensa la mayor complejidad operativa y costos iniciales con ganancias significativas en escalabilidad, mantenibilidad a largo plazo, y capacidad de integrar fácilmente nuevos servicios (como la obligatoria integración WhatsApp), lo que es crítico para el éxito comercial de BarberFlow.
