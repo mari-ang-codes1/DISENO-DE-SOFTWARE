@@ -273,3 +273,211 @@ graph TD
 | **Costo de desarrollo inicial** | Requiere más tiempo de diseño y configuración inicial. | Prototipado rápido, uso de frameworks (Node.js/Express, Django, Spring Boot) que facilitan la creación rápida de APIs. |
 
 **Trade-offs aceptados:** Se compensa la mayor complejidad operativa y costos iniciales con ganancias significativas en escalabilidad, mantenibilidad a largo plazo, y capacidad de integrar fácilmente nuevos servicios (como la obligatoria integración WhatsApp), lo que es crítico para el éxito comercial de BarberFlow.
+
+## 5.5 Diseño de Interfaces
+
+### 5.5.B Interfaces Internas
+
+#### Servicio CitaService
+El servicio `CitaService` es el componente central que encapsula la lógica de negocio relacionada con el ciclo de vida de las citas. Funciona como un servicio de bajo nivel que puede ser consumido por capas superiores o por la API REST externa.
+
+**Contrato del servicio (API interna):**
+
+```
+interface CitaService {
+  // Operaciones de creación y gestión de citas
+  crearCita(datosCita: DatosCitaInput): Promise<ResultadoCita>
+  cancelarCita(citaId: string, razon?: string): Promise<ResultadoCancelacion>
+  obtenerAgendaBarbero(barberoId: string, fecha: Date): Promise<AgendaBarbero>
+  confirmarCita(citaId: string): Promise<Cita>
+  finalizarCita(citaId: string, observaciones?: string): Promise<Cita>
+  
+  // Consultas de estado y historial
+  obtenerEstadoCita(citaId: string): Promise<EstadoCita>
+  listarCitasCliente(clienteId: string, fechaInicio?: Date, fechaFin?: Date): Promise<Cita[]>
+  listarCitasBarbero(barberoId: string, fechaInicio?: Date, fechaFin?: Date): Promise<Cita[]>
+}
+```
+
+**Tipos de datos de entrada:**
+
+```
+interface DatosCitaInput {
+  clienteId: string;
+  barberoId: string;
+  servicioId: string;
+  fechaHora: Date;
+  tipoRecordatorio?: '24h' | '1h' | 'nenhum';
+}
+
+interface DatosValidacionHorario {
+  barberoId: string;
+  fechaHora: Date;
+  exclusiones?: string[]; // IDs de citas existentes a excluir
+}
+
+interface DatosTurnoLaboral {
+  barberoId: string;
+  diaSemana: number; // 0-6 (domingo-sábado)
+  horaInicio: string; // formato HH:MM
+  horaFin: string; // formato HH:MM
+}
+```
+
+**Resultados esperados:**
+
+```
+interface ResultadoCita {
+  citaId: string;
+  estado: 'Solicitada' | 'Confirmada' | 'EnAtención' | 'Finalizada' | 'Cancelada';
+  mensaje: string;
+  notificacion?: NotificacionData;
+}
+
+interface ResultadoCancelacion {
+  cancelada: boolean;
+  reembolso?: boolean;
+  mensaje: string;
+  penalizacion: boolean; // true si se aplicó penalización por cancelación < 2h
+}
+
+interface AgendaBarbero {
+  fecha: string;
+  citas: CitaAgendada[];
+  huecosDisponibles: Hueco[];
+}
+
+interface CitaAgendada {
+  citaId: string;
+  clienteNombre: string;
+  servicioNombre: string;
+  horaInicio: string;
+  horaFin: string;
+  estado: EstadoCita;
+}
+```
+
+**Excepciones/errores posibles:**
+
+```
+enum CitaErrorCode {
+  BARBERO_NO_DISPONIBLE = 'BARBERO_NO_DISPONIBLE',
+  HORA_YA_OCCUPADA = 'HORA_YA_OCCUPADA',
+  BARBERO_FUERA_DE_TURNO = 'BARBERO_FUERA_DE_TURNO',
+  CANCELACION_TARDIA = 'CANCELACION_TARDIA',
+  CITA_NO_ENCONTRADA = 'CITA_NO_ENCONTRADA',
+  VALIDACION_FALLIDA = 'VALIDACION_FALLIDA',
+  BASE_DATOS_NO_DISPONIBLE = 'BASE_DATOS_NO_DISPONIBLE'
+}
+
+interface ErrorCita {
+  codigo: CitaErrorCode;
+  mensaje: string;
+  detalles?: any;
+  campo?: string; // campo inválido, si aplica
+}
+```
+
+---
+
+### 5.5.C Interfaces Externas
+
+#### Integración con Twilio WhatsApp API
+
+**Propósito de la integración:**
+Envio automático de notificaciones y recordatorios de citas a través de WhatsApp, canal preferido por la mayoría de los clientes del segmento de barbería/estética. La integración cubre:
+- Confirmación de reserva inmediatamente después del agendamiento
+- Recordatorio de 24 horas antes de la cita
+- Recordatorio de 1 hora antes de la cita
+- Notificaciones de cambio de estado (cita en atención, finalizada)
+- Confirmación de cancelación
+
+**Información enviada/recibida:**
+
+| Dirección | Campo | Tipo | Descripción |
+|-----------|-------|------|-------------|
+| **Enviar (POST)** | `to` | string | Número de teléfono del cliente en formato E.164 (ej: +54911987654321) |
+| | `body` | string | Mensaje de texto con detalles de la cita |
+| | `from` | string | Número de WhatsApp empresarial proporcionado por Twilio |
+| | `statusCallback` | string | URL webhook para notificar el estado de entrega |
+| **Recibir (GET/webhook)** | `MessageSid` | string | Identificador único del mensaje |
+| | `MessageStatus` | string | Estado: sent, delivered, read, failed, rejected |
+| | `NumMedia` | number | Número de archivos multimedia adjuntos |
+| | `Body` | string | El cuerpo del mensaje recibido (si es respuesta del cliente) |
+| | `Wallet` | object | Información de cobro (si aplica) |
+
+**Formato y mecanismo (HTTP REST/JSON):**
+
+```
+Método: POST
+URL: https://api.twilio.com/2010-04-01/Accounts/{AccountSid}/Messages.json
+
+Ejemplo de petición:
+```bash
+curl -X POST "https://api.twilio.com/2010-04-01/Accounts/ACxxxxxxxxxxxxxxxxx/Messages.json" \
+     --data-urlencode "Body=Hola María! Tu cita de corte y barba está confirmada para el 15/03 a las 14:30 con el barbero Juan. Te esperamos! 💈" \
+     --data-urlencode "From=+15017122661" \
+     --data-urlencode "To=+5491123456789" \
+     -u "ACxxxxxxxxxxxxxxxxx:your_auth_token"
+```
+
+**Ejemplo de respuesta exitosa (201 Created):**
+```json
+{
+  "sid": "SMxxxxxxxxxxxxxxxxx",
+  "status": "queued",
+  "date_created": "2024-03-10T14:30:00Z",
+  "date_updated": "2024-03-10T14:30:00Z",
+  "url": "https://api.twilio.com/2010-04-01/Accounts/ACxxxxxxxxxxxxxxxxx/Messages/SMxxxxxxxxxxxxxxxxx.json"
+}
+```
+
+**Autenticación por Token:**
+- Se utilizan credenciales de cuenta de Twilio (Account SID y Auth Token)
+- Autenticación HTTP Basic: `Authorization: Basic <base64 de AccountSid:authToken>`
+- Las credenciales se almacenan de forma segura en variables de entorno y/o AWS Secrets Manager
+- El token se rota cada 90 días como práctica de seguridad
+- Las URLs de webhook deben ser accesibles públicamente (usando ngrok en desarrollo, dominio público en producción)
+
+**Manejo de errores:**
+
+| Código HTTP | Significado | Acción |
+|-------------|-------------|--------|
+| 200-201 | Éxito | Marcar notificación como enviada, registrar SID de Twilio |
+| 400 | Bad Request | Validar números de teléfono, formato de mensaje; registrar error y notificar al equipo |
+| 401 | Unauthorized | Credenciales inválidas; detener envíos y solicitar renovación de token |
+| 403 | Forbidden | Número bloqueado o restricciones de cuenta; revisar configuración Twilio |
+| 429 | Too Many Requests | Retry con backoff exponencial (máx 3 intentos en 24h) |
+| 500 | Internal Server Error | Retry con backoff exponencial; si persiste, alertar al equipo operativo |
+| 503 | Service Unavailable | Retry con backoff exponencial; el servicio Twilio puede estar en mantenimiento |
+
+**Errores de validación de negocio:**
+- `NUMERO_BLOQUEADO`: El número del cliente ha bloqueado mensajes de WhatsApp de esta fuente
+- `CONTENIDO_INVALIDO`: El mensaje no cumple con las políticas de contenido de Twilio
+- `LIMITE_MENSAJES_EXCEDIDO`: Se ha excedido el límite de mensajes por día en la cuenta de Twilio
+
+**Comportamiento cuando el servicio externo no está disponible:**
+
+1. **Fallback inmediato:** Si Twilio no responde después de 5 segundos, el sistema continúa el flujo normal de agendamiento/cancelación marcando la notificación como "pendiente".
+
+2. **Cola de reintentos:** Las notificaciones fallidas se colocan en una cola de retry con los siguientes parámetros:
+   - Máximo de 3 intentos de reenvío
+   - Backoff exponencial: 1min, 5min, 30min entre intentos
+   - Ventana de 24 horas para completar todos los reintentos
+
+3. **Marcado en base de datos:** Cada cita/register notification tiene un campo `notificacionWhatsApp.enviada: boolean` y `notificacionWhatsApp.intentos: number` y `notificacionWhatsApp.ultimoIntento: datetime`.
+
+4. **Notificación alternativa:** Si después de 3 intentos la notificación falla, el sistema:
+   - Marca la notificación como `enviada: false` y `fallback: true`
+   - Genera un registro de error para revisión manual
+   - Envía un email alternativo (si el cliente tiene email registrado)
+   - Muestra un badge/indicador en el panel de control administrativo indicando "recordatorios no enviados"
+   - Permite al administrador reenviar la notificación manualmente desde la interfaz
+
+5. **Continuidad del servicio:** El agendamiento, cancelación y otras operaciones del sistema funcionan independientemente del estado de Twilio. La falta de notificación WhatsApp no impide la operación de la cita, solo reduce la tasa de recordatorios automáticos.
+
+6. **Monitoreo y alertas:** Se establecen umbrales de alerta:
+   - > 5 fallos en 1 hora → alerta por email al equipo de desarrollo
+   - > 20 fallos en 24 horas → alerta SMS al líder técnico
+   - Registros en Datadog/New Relic para monitoreo de SLA de la integración (objetivo: > 95% de éxito en envío)
+
