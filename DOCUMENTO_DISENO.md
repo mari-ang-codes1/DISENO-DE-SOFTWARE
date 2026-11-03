@@ -506,3 +506,157 @@ curl -X POST "https://api.twilio.com/2010-04-01/Accounts/ACxxxxxxxxxxxxxxxxx/Mes
 
 
 
+
+## 5.6 Diseño de Componentes
+
+### 5.6.1 Componentes Principales del Sistema
+
+#### UIComponent
+Componente responsable de la interfaz de usuario en ambas plataformas (Web y Móvil).
+- **Interfaz ofrecida**: Exposición de vistas y componentes de navegación (LoginView, CalendarView, AgendaView, ReportView)
+- **Interfaz requerida**: Comunicación con AuthController para validación de sesión y CitaController para operaciones de cita
+- **Dependencias**: React/Vue framework, CSS framework (Material-UI/Bootstrap), Axios para llamadas HTTP
+- **Descripción**: Componente modular y responsivo que gestiona la experiencia de usuario en dispositivos de escritorio y móviles, manejando la navegación entre las 4 pantallas principales y actualizando la vista en tiempo real ante cambios de estado del sistema.
+
+#### AuthController
+Controlador de autenticación y gestión de sesiones.
+- **Interfaz ofrecida**: Métodos de login, logout, validarToken, obtenerPerfilUsuario, refreshSession
+- **Interfaz requerida**: Comunicación con Base de Datos para verificar credenciales y con UIComponent para notificar estado de autenticación
+- **Dependencias**: JWT (JSON Web Tokens), BCrypt para hashing de contraseñas, integración con Base de Datos
+- **Descripción**: Componente que gestiona el ciclo de vida de la autenticación del usuario, validando credenciales, generando tokens de sesión y controlando el acceso a las diferentes funcionalidades del sistema según el rol del usuario (Cliente, Barbero, Administrador).
+
+#### CitaController
+Controlador que coordina las operaciones relacionadas con citas.
+- **Interfaz ofrecida**: Métodos crearCita, cancelarCita, confirmarCita, finalizarCita, obtenerAgenda, listarCitas
+- **Interfaz requerida**: Comunicación con CitaService para lógica de negocio y con UIComponent para mostrar resultados al usuario
+- **Dependencias**: CitaService, UIComponent, validación de reglas de negocio
+- **Descripción**: Actuador intermedio que recibe peticiones HTTP del frontend, valida que se cumplan los requisitos previos y delega la lógica compleja a CitaService, traduciendo los resultados a respuestas apropiadas para la interfaz de usuario.
+
+#### CitaService
+Servicio de dominio que encapsula la lógica de negocio de las citas.
+- **Interfaz ofrecida**: Operaciones crearCita, cancelarCita, obtenerAgendaBarbero, confirmarCita, finalizarCita, validarReglasNegocio
+- **Interfaz requerida**: Comunicación con DatabaseAdapter para persistencia, validación de turnos laborales, coordinación con NotificationAdapter
+- **Dependencias**: DatabaseAdapter, NotificationAdapter, enum EstadoCita, ReglasNegocio (RN1-RN3)
+- **Descripción**: Nucleo de la lógica de negocio que implementa las reglas de restricción de horarios duplicados, validación de turnos laborales y tiempo de cancelación. Este servicio es el responsable de garantizar la integridad de los datos antes de persistiarlos y antes de desencadenar cualquier acción secundaria.
+
+#### NotificationAdapter
+Adaptador que maneja la comunicación con servicios externos de notificación.
+- **Interfaz ofrecida**: enviarNotificacion, programarRecordatorio, cancelarNotificacion
+- **Interfaz requerida**: Comunicación con NotificationService externo (Twilio API) y configuración de parámetros de envío
+- **Dependencias**: Twilio API credentials, cola de reintentos, configuración de plantillas de mensaje
+- **Descripción**: Capa de adaptación que aísla la lógica del sistema de los detalles específicos de la API externa de Twilio. Encarga el envío de notificaciones por WhatsApp, SMS y email, manejando retries, fallbacks y reintentos según las políticas definidas.
+
+#### DatabaseAdapter
+Capa de abstracción para el acceso a la base de datos relacional.
+- **Interfaz ofrecida**: métodos CRUD completos para entidades (Cliente, Barbero, Cita, Servicio), transacciones, consultas parametrizadas
+- **Interfaz requerida**: Ninguna (es el proveedor de datos)
+- **Dependencias**: Motor de base de datos (PostgreSQL/MySQL), ORMA (opcional como Sequelize/TypeORM), scripts de migración
+- **Descripción**: Capa de abstracción que aísla el resto del sistema de los detalles de implementación de la base de datos. Proporciona métodos seguros y optimizados para operaciones de lectura y escritura, garantizando la integridad transaccional y el manejo apropiado de conexiones y pools de base de datos.
+
+### 5.6.2 Diagrama UML de Componentes
+```mermaid
+graph TD
+    subgraph UI["UIComponent (Frontend Web/Móvil)"]
+        direction BT
+        Login["LoginView"]
+        Dashboard["DashboardView"]
+        Agenda["AgendaView"]
+        CitaForm["CitaFormView"]
+    end
+    
+    subgraph BE["Backend Components"]
+        direction BT
+        Auth["AuthController"]
+        CitaCtrl["CitaController"]
+        CitaServ["CitaService"]
+        NotifAdapter["NotificationAdapter"]
+        DB["DatabaseAdapter"]
+    end
+    
+    subgraph DB_Style["Database Layer"]
+        direction BT
+        SQL["PostgreSQL/MySQL"]
+    end
+    
+    subgraph Twilio_Style["External Services"]
+        direction BT
+        Twilio["Twilio API (WhatsApp)"]
+    end
+    
+    UI -->|HTTP Requests| Auth
+    UI -->|HTTP Requests| CitaCtrl
+    
+    Auth -->|Valida Credenciales| DB
+    Auth -->|Genera/Valida JWT| UI
+    
+    CitaCtrl -->|Solicita operaciones| CitaServ
+    CitaCtrl -->|Retorna resultados| UI
+    
+    CitaServ -->|Validación RN1-RN3| CitaServ
+    CitaServ -->|Persiste/Obtiene| DB
+    CitaServ -->|Programa notificaciones| NotifAdapter
+    
+    NotifAdapter -->|HTTP POST| Twilio
+    NotifAdapter -->|Configuración| UI (parámetros)
+    
+    DB -->|Almacena/Recolecta| SQL
+    
+    style UI fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    style BE fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
+    style DB_Style fill:#f1f8e9,stroke:#43a047,stroke-width:2px
+    style Twilio_Style fill:#eceff1,stroke:#607d8b,stroke-width:2px
+```
+
+### 5.6.3 Diagrama de Secuencia: Agendamiento de Cita
+
+```mermaid
+sequenceDiagram
+    participant CLIENTE as Cliente
+    participant UI as UIComponent
+    participant AUTH as AuthController
+    participant CS as CitaService
+    participant DA as DatabaseAdapter
+    participant NA as NotificationAdapter
+    participant TW as Twilio API
+    
+    CLIENTE->>UI: Abre sistema y seleciona rol "Cliente"
+    CLIENTE->>UI: Navega a catálogo de servicios
+    CLIENTE->>UI: Selecciona servicio, barbero, fecha y hora
+    
+    UI->>AUTH: login(credenciales) 
+    AUTH->>DA: validarCredenciales(user, pass)
+    DA-->>AUTH: success/failed
+    AUTH-->>UI: token JWT + rol
+    
+    UI->>CS: crearCita(datosCita)
+    CS->>DA: transaccion.begin()
+    CS->>DA: validarHorarioDuplicado(cliente, fechaHora)
+    DA-->>CS: resultado validación
+    
+    alt ¿Horario ocupado?
+        case Sí
+            CS-->>UI: error "Horario no disponible"
+        case No
+            CS->>DA: validarTurnoBarbero(barbero, fechaHora)
+            DA-->>CS: turno válido/inválido
+            
+            alt ¿Barbero en turno?
+                case No
+                    CS-->>UI: error "Barbero fuera de turno"
+                case Sí
+                    CS->>DA: persistirCita(en BD)
+                    DA-->>CS: citaID generada
+                    
+                    CS->>NA: programarNotificaciones(citaID)
+                    NA->>TW: POST /Messages (WhatsApp)
+                    TW-->>NA: status "queued/accepted"
+                    NA-->>CS: confirmación envío
+                    
+                    CS->>DA: transaccion.commit()
+                    CS-->>UI: éxito "Cita agendada + confirmación WhatsApp"
+            end
+    end
+    
+    UI-->>CLIENTE: Mostrar mensaje de confirmación
+    CLIENTE-->>UI: Recibe notificación WhatsApp
+```
