@@ -20,7 +20,7 @@ BarberFlow es un sistema integral de gestión de citas y servicios diseñado par
 3. **Administrador**: Inicia sesión, gestiona horarios y turnos del personal, define tarifas por servicio, supervisa reportes de ocupación e ingresos, y gestiona roles de personal.
 
 ## Enlace al Prototipo
-- **Figma**: [https://www.figma.com/file/barberflow-prototype-ds](https://www.figma.com/file/barberflow-prototype-ds)
+- **Figma**: [https://www.figma.com/make/fQeMDEdPk2sCGm7yn6JI0a/BarberFlow-Booking-App?t=E1sQn9B5KzyHr3Bj-1](https://www.figma.com/make/fQeMDEdPk2sCGm7yn6JI0a/BarberFlow-Booking-App?t=E1sQn9B5KzyHr3Bj-1)
 
 ## Tabla de Contenidos
 

@@ -661,43 +661,6 @@ sequenceDiagram
     CLIENTE-->>UI: Recibe notificación WhatsApp
 ```
 
-## 5.7 Matriz de Trazabilidad
-
-| Requerimiento/Estructura | Descripción | Atributo de Calidad | Decisión de Diseño | Componente | Estructura de Datos | Interfaz |
-|--------------------------|-------------|---------------------|--------------------|------------|--------------------|----------|
-| **RF1** Explorar catálogo de servicios | El cliente debe poder ver todos los servicios disponibles con descripciones y precios | Usabilidad | Diseño de menú desplegable y tarjetas de servicio con información clara | UIComponent | Listado de objetos Servicio [id, nombre, precio, duración] | Pantalla 2: Catálogo |
-| **RF2** Seleccionar barbero disponible | El cliente debe seleccionar un barbero de la lista de disponibles | Usabilidad | Filtro en tiempo real por disponibilidad y especialidad | CitaService | Objeto Barbero [id, nombre, especialidad, turnoActual] | Pantalla 2: Catálogo |
-| **RF3** Agendar cita respetando franja | El sistema debe agendar citas sin superposición de horarios | Rendimiento | Validación en CitaService antes de persistencia | CitaService | Estructura DatosCitaInput con validación pre-persistencia | Pantalla 2→3 |
-| **RN1** Restricción de horario duplicado | Un cliente no puede agendar dos citas en la misma franja horaria | Disponibilidad | Validación transaccional en base de datos con bloqueo optimista | DatabaseAdapter | Constraints únicas en tabla Citas sobre (cliente, fechaHora) | Transversal |
-| **RF4** Gestión ciclo vida cita | Citas: Solicitada → Confirmada → En Atención → Finalizada/Cancelada | Usabilidad | Estados visuales en dashboard y flujos de navegación definidos | CitaService | Campo enum estado en entidad Cita | Dashboard Barbero |
-| **RF5** Notificaciones WhatsApp | Envío automático de confirmaciones y recordatorios | Disponibilidad | Integración con Twilio API con manejo de fallbacks | NotificationAdapter | Registro notificacionWhatsApp (enviada, intentos, últimoIntento) | Flujo Pantalla 3 |
-| **RN2** Cancelación 2h antelación | Las cancelaciones deben realizarse con al menos 2 horas de anticipación | Usabilidad | Validación de tiempo en CitaService, mensaje de advertencia UI | CitaService | Campo horaCancelacion en entidad Cita, comparación con DateTime.now | Pantalla 3 |
-| **RN3** Validación turno barbero | No se permite asignar cita a barbero fuera de turno laboral | Disponibilidad | Consulta de tabla Turnos antes de asignar cita | CitaService | Objeto DatosTurnoLaboral, validación horaria | Transversal |
-| **RNF1** Interfaz móvil ágil | Carga < 2s en conexiones móviles estándar | Rendimiento | Optimización de imágenes, lazy loading, API REST ligera | UIComponent | Cacheo client-side, responsive design breakpoints | Todas las pantallas |
-| **RNF2** Disponibilidad 24/7 | Sistema disponible para agendamiento en línea | Disponibilidad | Arquitectura Cliente-Servidor con redundancia | DatabaseAdapter | Connection pool, horarios de mantenimiento fuera de pico | API Gateway |
-| **RNF3** Rendimiento <500ms | Tiempo de respuesta para consultas de agenda | Rendimiento | Indexación de tablas, caché de consultas frecuentes | DatabaseAdapter | Índices en fechaHora, idBarbero, idCliente en tabla Citas | Consultas API |
-| **RNF4** Interoperabilidad API | Integración con Twilio y navegadores modernos | Interoperabilidad | API RESTful con OpenAPI specification, compatibilidad multiplataforma | CitaController, NotificationAdapter | Esquemas JSON para requests/responses, webhook URLs | API Twilio, navegadores |
-
-## 10. Declaración de Uso de Inteligencia Artificial
-
-| Herramientas Utilizadas | Actividades Empleadas | Validación Humana Efectuada |
-|-------------------------|-----------------------|-----------------------------|
-| **opencode/nemotron-3.5-lightning-free** (modelo de lenguaje) | - Generación de contenido Markdown estructurado<br>- Redacción de descripciones técnicas y documentación<br>- Sugerencia de diagramas Mermaid.js y estructuras de datos<br>- Redacción de reglas de negocio y atributos de calidad | **Equipo BarberFlow** (María Ángel Arias López, Angeli Cecilia Zambrano Navarro, Carlos Urieles López, Leticia Vega Melo):<br>- Revisión y aprobación de todo el contenido generado<br>- Ajuste y corrección de detalles específicos del dominio barbería<br>- Validación de consistencia con requisitos académicos<br>- Enriquecimiento de diagramas con datos reales del caso de uso<br>- Selección y personalización de ejemplos de JSON/DTO<br>- Decisión final sobre arquitecturas y diseños propuestos |
-| **Búsqueda web contextual** | - Investigación de convenciones de diseño de software<br>- Referencia de patrones arquitectónicos comunes<br>- Validación de mejores prácticas de documentación | **Equipo BarberFlow**: Contexto y verificación que las convenciones aplicadas sean coherentes con el proyecto y la asignatura Diseño de Software |
-| **Herramientas de formato** (bash, sed, cat) | - Estructuración y manipulación de archivos de documentación<br>- Formato consistente de tablas y bloques de código<br>- Integración gradual de secciones en documento existente | **Equipo BarberFlow**: Supervisión del formato, aseguramiento de que todas las secciones cumplan con los requisitos y no haya contenido duplicado o inconsistente |
-
-**Nota:** La inteligencia artificial fue utilizada como herramienta de apoyo para la generación y formateo de documentación técnica, pero todo el contenido conceptual, decisiones de diseño, reglas de negocio y validaciones del proyecto fueron definidas y validadas completamente por el equipo humano del proyecto BarberFlow.
-
-## 6.1 Conclusiones y Referencias
-
-### 6.1.1 Conclusiones
-
-El proyecto BarberFlow ha permitido diseñar y documentar un sistema integral de gestión de citas y servicios para una barbería/estética local. Las principales conclusiones son:
-
-1. **Arquitectura seleccionada**: La arquitectura Cliente-Servidor Desacoplada resulta la opción más adecuada para satisfacer los requisitos de usabilidad en dispositivos móviles, escalabilidad durante picos de demanda y facilidad de integración con servicios externos (específicamente la obligatoria API de Twilio WhatsApp). La opción Monolito MVC fue descarte por limitaciones de movilidad y acoplamiento estrecho.
-
-2. **Abordaje integral de calidad**: Los atributos de calidad (usabilidad, disponibilidad, rendimiento e interoperabilidad) no son aislados sino que interactúan en todas las decisiones de diseño. La integración de la usabilidad con la disponibilidad y rendimiento es particularmente crítica en el contexto de una barbería donde tanto clientes como barberos necesitan acceso rápido y fiable.
-
 3. **Importancia de las reglas de negocio**: Las tres reglas de negocio (RN1-RN3) son el pilar central que conecta el dominio del problema con la solución tecnológica. La validación de turnos laborales, la restricción de horarios duplicados y la política de cancelación con 2 horas de antelación definen la lógica de negocio y deben estar presentes en todos los componentes del sistema.
 
 4. **Diseño centrado en datos**: El diseño de la capa de datos (entidades E-R, diagramas de clases, estructuras DTO) precede y fundamenta la arquitectura de aplicaciones. Una modelación de datos sólida facilita la implementación, el mantenimiento y la escalabilidad del sistema.
@@ -713,6 +676,24 @@ El proyecto BarberFlow ha permitido diseñar y documentar un sistema integral de
 3. Twilio Documentation. (2024). *WhatsApp API QuickStart Guide*. Recuperado de https://www.twilio.com/docs/whapi/quickstart
 4. Mermaid.js Documentation. (2024). *Diagrams Syntax and Rendering*. Recuperado de https://mermaid-js.github.io/
 5. ISO/IEC 25010:2011. *Systems and software quality requirements and metrics for systems and software engineering*.
+
+## 5.7 Matriz de Trazabilidad
+
+| Requerimiento / Restricción | Atributo de Calidad | Decisión de Diseño | Componente | Estructura de Datos | Interfaz |
+|---------------------------|---------------------|--------------------|------------|--------------------|---------|
+| **RF1** Explorar catálogo de servicios | Usabilidad | Diseño de menú desplegable y tarjetas de servicio con información clara | UIComponent | Listado de objetos Servicio [id, nombre, precio, duración] | Pantalla 2: Catálogo |
+| **RF2** Seleccionar barbero disponible | Usabilidad | Filtro en tiempo real por disponibilidad y especialidad | CitaService | Objeto Barbero [id, nombre, especialidad, turnoActual] | Pantalla 2: Catálogo |
+| **RF3** Agendar cita respetando franja | Rendimiento | Validación en CitaService antes de persistencia | CitaService | Estructura DatosCitaInput con validación pre-persistencia | Pantalla 2→3 |
+| **RN1** Restricción de horario duplicado | Disponibilidad | Validación transaccional en base de datos con bloqueo optimista | DatabaseAdapter | Constraints únicas en tabla Citas sobre (cliente, fechaHora) | Transversal |
+| **RF4** Gestión ciclo vida cita | Usabilidad | Estados visuales en dashboard y flujos de navegación definidos | CitaService | Campo enum estado en entidad Cita | Dashboard Barbero |
+| **RF5** Notificaciones WhatsApp | Disponibilidad | Integración con Twilio API con manejo de fallbacks | NotificationAdapter | Registro notificacionWhatsApp (enviada, intentos, últimoIntento) | Flujo Pantalla 3 |
+| **RN2** Cancelación 2h antelación | Usabilidad | Validación de tiempo en CitaService, mensaje de advertencia UI | CitaService | Campo horaCancelacion en entidad Cita, comparación con DateTime.now | Pantalla 3 |
+| **RN3** Validación turno barbero | Disponibilidad | Consulta de tabla Turnos antes de asignar cita | CitaService | Objeto DatosTurnoLaboral, validación horaria | Transversal |
+| **RNF1** Interfaz móvil ágil | Rendimiento | Optimización de imágenes, lazy loading, API REST ligera | UIComponent | Cacheo client-side, responsive design breakpoints | Todas las pantallas |
+| **RNF2** Disponibilidad 24/7 | Disponibilidad | Arquitectura Cliente-Servidor con redundancia | DatabaseAdapter | Connection pool, horarios de mantenimiento fuera de pico | API Gateway |
+| **RNF3** Rendimiento <500ms | Rendimiento | Indexación de tablas, caché de consultas frecuentes | DatabaseAdapter | Índices en fechaHora, idBarbero, idCliente en tabla Citas | Consultas API |
+| **RNF4** Interoperabilidad API | Interoperabilidad | API RESTful con OpenAPI specification, compatibilidad multiplataforma | CitaController, NotificationAdapter | Esquemas JSON para requests/responses, webhook URLs | API Twilio, navegadores |
+
 6. Fowler, M. (2014). *Patterns of Enterprise Application Architecture*. Boston: Addison-Wesley.
 
 ---
