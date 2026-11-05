@@ -297,7 +297,7 @@ El sistema BarberFlow consta de 4 pantallas principales por las que el usuario n
 - **Visibilidad del estado**: Cada pantalla muestra el estado actual del sistema (usuario identificado, cita seleccionada, reserva confirmada, agenda actualizada). Los cambios de estado se reflejan inmediatamente con retroalimentación visual.
 - **Retroalimentación**: Cada acción del usuario recibe una respuesta inmediata (mensajes de éxito/Error, carga spinners, actualizaciones de agenda). Las notificaciones por WhatsApp confirman la entrega al usuario. Uso de colores consistentes (verde para éxito, rojo para errores, amarillo para advertencias).
 
-[https://www.figma.com/file/barberflow-prototype-ds]
+[https://www.figma.com/make/fQeMDEdPk2sCGm7yn6JI0a/BarberFlow-Booking-App?t=E1sQn9B5KzyHr3Bj-1]
 
 ### 5.5.B Interfaces Internas
 
