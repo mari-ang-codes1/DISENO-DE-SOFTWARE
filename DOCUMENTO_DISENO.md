@@ -721,3 +721,282 @@ El proyecto BarberFlow ha permitido diseñar y documentar un sistema integral de
 Asignatura: Diseño de Software - Profesor Sergio Lubo  
 Integrantes: María Ángel Arias López, Angeli Cecilia Zambrano Navarro, Carlos Urieles López, Leticia Vega Melo  
 Año académico: 2026
+
+## 5.8 Frontera del Sistema e Interfaces
+
+### 5.8.1 Declaración de la Frontera del Sistema
+
+La **Frontera del Sistema** de BarberFlow define el límite entre lo que el sistema gestiona internamente y lo que depende de servicios externos. Matemáticamente, se puede expresar como:
+
+```
+Frontera(Sistema) = {Entidades, Componentes, Datos bajo control transaccional} ∂ SistemaExterno
+```
+
+El sistema BarbberFlow gestiona integralmente el ciclo de vida de las citas, la agenda del barbero, los perfiles de cliente y las tarifas de servicio dentro de su perímetro transaccional. Cualquier elemento que requiera coordinación fuera de este perímetro (como la interacción con el usuario final en tiempo real o servicios de notificación asíncronos) cruza la frontera de manera controlada y con mecanismos de fallback definidos.
+
+Los actores dentro de la frontera son:
+- **Cliente**: Interactúa dentro del perímetro a través de la interfaz móvil/web
+- **Barbero**: Gestiona su agenda y estados dentro del sistema
+- **Administrador**: Opera sobre configuraciones y reportes dentro del sistema
+
+Los elementos que cruzan la frontera están explícitamente identificados y gestionados mediante adaptadores que aíslan las dependencias externas.
+
+### 5.8.2 Justificación del Criterio de Frontera: Internas vs Externas
+
+La distinción entre interfaces internas y externas no se basa en la tecnología de transporte (REST, HTTP, JSON), sino en el **criterio de frontera de control transaccional y dominio de responsabilidad**:
+
+#### ¿Por qué UI <-> Backend es INTERNA?
+
+1. **Mismo dominio de negocio**: Ambas operan dentro del mismo caso de uso de gestión de citas barbería. La UI (interfaz de usuario) y el Backend comparten el mismo modelo de datos y reglas de negocio RN1-RN3.
+
+2. **Mismo límite de confianza**: Ambos componentes están bajo el mismo modelo de seguridad y despliegue. El desarrollador o equipo de operaciones tiene control sobre ambos lados de la comunicación.
+
+3. **Compacidad transaccional**: La comunicación UI <-> Backend forma parte de la transacción principal de agendamiento. No hay necesidad de mecanismos de recuperación complejos porque fallos aquí se manejan dentro del mismo proceso de transacción.
+
+4. **Mismo ciclo de vida de despliegue**: Tanto la UI como el Backend se despliegan conjuntamente o bajo la misma estrategia de release train, lo que los mantiene dentro de la misma frontera operativa.
+
+```
+Ejemplo: Cuando el cliente selecciona un barbero en la Pantalla 2, la comunicación 
+Pantalla -> API REST -> CitaService es INTERNA porque:
+- El endpoint /api/citas forma parte del mismo servicio deployado
+- La validación de reglas RN1 (sin horario duplicado) ocurre en CitaService inmediatamente
+- No hay dependencia externa ni tiempo de respuesta incierto que requiera mecanismos de fallback
+```
+
+#### ¿Por qué CitaService <-> Base de Datos es INTERNA?
+
+1. **Mismo ámbito de transacción**: La base de datos es el sistema de persistencia del mismo servicio. La transacción ACID abarca tanto la lógica de negocio como el almacenamiento.
+
+2. **Mismo modelo de seguridad**: El acceso a la base de datos usa credenciales y permisos definidos dentro de la política de seguridad del sistema, no credenciales de terceros.
+
+3. **Competencia de fallos**: Los fallos de base de datos se manejan con patrones de retry y circuit breaker dentro del mismo contexto de ejecución, no como un servicio externo impredecible.
+
+4. **Datos estructurales**: Los datos (entidades Cita, Barbero, Servicio) son propiedad del dominio del sistema, no de un proveedor externo.
+
+```
+Ejemplo: Cuando CitaService valida RN1 (restricción de horario duplicado), la consulta 
+a la base de datos es INTERNA porque:
+- La tabla Citas pertenece a la misma instancia de base de datos
+- El patrón de bloqueo optimista es interno al servicio
+- No hay SLA externo ni proveedor involucrado
+```
+
+#### ¿Por qué API de Twilio/WhatsApp es EXTERNA?
+
+1. **Proveedor de servicio terzo**: Twilio es una empresa externa al proyecto BarberFlow, con su propia SLA, contratos de servicio y políticas de uso.
+
+2. **Falla independiente**: La red, disponibilidad y rendimiento de Twilio son independientes del sistema BarberFlow. Pueden caer mientras el sistema interno funciona correctamente.
+
+3. **Costo y suscripción**: El uso de Twilio implica costos por mensaje, límites de tasa y requisitos de cuenta que están fuera del control del equipo de BarberFlow.
+
+4. **Mecanismos de fallback obligatorios**: Por definición de frontera externa, el sistema debe diseñar mecanismos de recuperación (colas Outbox, reintentos, notificaciones alternativas) porque la falla es esperada y frecuente.
+
+```
+Ejemplo: El envío de notificación por WhatsApp es EXTERNA porque:
+- Requiere credenciales de cuenta Twilio (Account SID + Auth Token) - credenciales de tercero
+- La API tiene sus propios límites de tasa (rate limits) y costos por mensaje
+- Una falla en Twilio no implica fallo del sistema de agendamiento (la cita se confirma igual)
+- Se requiere el patrón Outbox/NotificaciónPendiente por definición de frontera externa
+- La dirección de endpoint (api.twilio.com) y autenticación HTTP Basic son ajenas al dominio barbería
+```
+
+#### Cuadro Comparativo de Criterio de Frontera
+
+| Característica | Interna (UI<->Backend, CitaService<->BD) | Externa (Twilio/WhatsApp) |
+|----------------|------------------------------------------|---------------------------|
+| **Propiedad** | Mismo proyecto/equipo | Tercero (Twilio Inc.) |
+| **SLA/Disponibilidad** | Dentro de control operativo | Proveedown third-party SLA |
+| **Costo por operación** | Incluido en infraestructura | Por mensaje (tarifa Twilio) |
+| **Fallas esperadas** | Manejo de errores estándar | Diseño obligatorio de fallback |
+| **Credenciales** | Variables de entorno del sistema | Credenciales de cuenta externa |
+| **Ciclo de despliegue** | Conjunto o coordinado | Independiente (Twilio gestión propia) |
+| **Patrón de resiliencia** | Retry/Saga transaccional | Outbox + Reintentos + Notificaciones alternativas |
+
+---
+
+## 5.9 Fichas Detalladas de Componentes
+
+### Ficha A: Componente Crítico de Reserva (Gestión de Citas - C-03)
+
+| Campo | Contenido |
+|-------|-----------|
+| **Identificador** | C-03 |
+| **Nombre del componente** | Gestión de Citas |
+| **Propósito** | Coordinar el ciclo de vida completo de una cita: solicitud, validación de reglas de negocio RN1-RN3, persistencia en agenda barbero y activación de notificaciones externas. Garantizar que no existan reservas superpuestas y que el estado de la cita evolucione Solicitada → Confirmada → En Atención → Finalizada/Cancelada. |
+| **Responsabilidades** | - Validar restricción de horario duplicado (RN1) antes de persistencia<br>- Validar turno laboral del barbero (RN3) antes de asignar cita<br>- Validar tiempo mínimo de cancelación (RN2) en operaciones de cancelación<br>- Coordinar persistencia atómica con base de datos<br>- Programar notificaciones mediante NotificationAdapter<br>- Retornar estado y datos de la cita creada al cliente| |
+| **Exclusiones** | - No gestiona pagos o procesamiento financiero directo<br>- No maneja la lógica de negocio de servicios adicionales fuera del horari<br>- No responsabilizarse de la interfaz de usuario más allá de los DTOs de respuesta| |
+| **Interfaces Provistas** | `crearCita(datosCita: DatosCitaInput): ResultadoCita`<br>`cancelarCita(citaId: string, razon?: string): ResultadoCancelacion`<br>`confirmarCita(citaId: string): Cita`<br>`finalizarCita(citaId: string, observaciones?: string): Cita`<br>`obtenerAgendaBarbero(barberoId: string, fecha: Date): AgendaBarbero`<br>`listarCitasCliente(clienteId: string, fechaInicio?: Date, fechaFin?: Date): Cita[]`|
+| **Interfaces Requiridas** | - `DatabaseAdapter`: persistencia y validación de constraints únicas<br>- `NotificationAdapter`: envío de notificaciones post-percistencia<br>- `AuthController`: validación de sesión y rol del usuario que crea la cita| |
+| **Clases de Datos** | `DatosCitaInput`: clienteId, barberoId, servicioId, fechaHora, tipoRecordatorio<br>`ResultadoCita`: citaId, estado, mensaje, notificacion?<br>`ResultadoCancelacion`: cancelada, reembolso?, mensaje, penalizacion<br>`AgendaBarbero`: fecha, citas: CitaAgendada[], huecosDisponibles:<br>`CitaAgendada`: citaId, clienteNombre, servicioNombre, horaInicio, horaFin, estado`<br>`DatosTurnoLaboral`: barberoId, diaSemana, horaInicio, horaFin| |
+| **Justificación con RNF-02** | La ficha C-03 debe diseñarse considerando **RNF-02 (Disponibilidad)**, ya que la gestión de citas es el núcleo operativo del sistema. Durante las horas pico de reserva (mañanas lunes-viernes), el componente debe: (1) manejar múltiples solicitudes concurrentes sin bloqueos que degraden la disponibilidad, (2) mantener tiempos de respuesta < 500ms en operaciones de consulta de agenda, (3) garantizar uptime del 99.5% mensual a través de transacciones ACID y conexión pool en DatabaseAdapter, (4) prevenir la doble reserva atómicamente mediante constraints únicas en base de datos y validación en CitaService antes de commit, asegurando que la disponibilidad percibida por el cliente sea consistente con la realidad del sistema. La ficha debe incluir mecanismos de circuit breaker y retry con backoff exponencial para operaciones de escritura, garantizando que la caída de un solo nodo no afecte la disponibilidad global del agendamiento. |
+
+### Ficha B: Componente de Integración (Gestión de Notificaciones - C-04)
+
+| Campo | Contenido |
+|-------|-----------|
+| **Identificador** | C-04 |
+| **Nombre del componente** | Gestión de Notificaciones |
+| **Propósito** | Coordinar el envío de notificaciones automáticas a través de canales externos, priorizando WhatsApp API (Twilio) pero con mecanismos de fallback a email y indicadores visuales en la interfaz. Desacoplar la confirmación de la cita de la entrega exitosa de la notificación, garantizando que la cita persista independientemente del estado del servicio externo. |
+| **Responsabilidades** | - Recibir solicitudes de notificación desde CitaService<br>- Formatear payload JSON para API externa (Twilio WhatsApp)<br>- Implementar patrón Outbox para acumular notificaciones pendientes<br>- Gestionar reintentos con backoff exponencial (máx 3 intentos en 24h)<br>- Registrar estado de envío (enviada, fallida, pendiente) en base de datos<br>- Proporcione notificación alternativa (email) cuando Twilio falla después de reintentos<br>- Exponer estado de notificación para consulta en dashboard administrador| |
+| **Exclusiones** | - No genera el contenido del mensaje (recibe plantilla y datos desde CitaService)<br>- No garantiza la lectura o visualización por parte del cliente final<br>- No gestiona la suscripción o preferencias de canal del cliente (solo envío)<br>- No responsables de fallos de red fuera del control del sistema| |
+| **Interfaces Provistas** | `enviarNotificacion(tipo: string, destino: string, contenido: string): ConfirmacionEnvio`<br>`programarRecordatorio(citaId: string, tiempoAntes: enum['24h','1h','nenhum']): IdentificadorRegistro`<br>`obtenerEstadoNotificacion(idNotificacion: string): EstadoNotificacion`<br>`reintentarNotificacionesPendientes(): numeroReintentos`|
+| **Interfaces Requiridas** | - `CitaService`: notificaciones a programar y datos de cita<br>- `DatabaseAdapter`: persistencia de registro Outbox y estado de notificación<br>- `Twilio API`: servicio externo de mensajería (access Token, endpoints)<br>- `Configuración de credenciales`: Account SID, Auth Token, número WhatsApp empresarial| |
+| **Patrón de Diseño** | **Outbox Pattern / NotificaciónPendiente**: <br>1. CitaService persiste la cita en BD en una transacción atomic<br>2. Después del commit, CitaService inserta un registro en tabla `notificacion_outbox` con: citaId, tipo, destino, contenido, estado='pendiente', intentos=0, creado_en<br>3. Un *worker* o *scheduler* independiente lee la tabla outbox cada N segundos<br>4. Para cada registro pendiente, el worker intenta enviar vía Twilio API<br>5. Si éxito: actualiza estado='enviada', registra SID de Twilio, incrementa intentos<br>6. Si falla: incrementa intentos, actualiza útlimoIntento, si intentos < 3 reprograma, si intentos >= 3 marca estado='fallback' y dispara notificación alternativa<br>7. El usuario ve siempre "Cita confirmada" al instante; la notificación es un bono asíncrono| |
+| **Justificación con RNF-03** | La ficha C-04 debe diseñarse considerando **RNF-03 (Rendimiento)**, ya que la gestión de notificaciones debe no degradar el sistema de agendamiento principal. Consideraciones clave: (1) El patrón Outbox aísla el tiempo de respuesta de la operación de agendamiento: el cliente recibe confirmación al instante (HTTP 201) sin esperar la respuesta de Twilio, cumpliendo el SLA de < 2s para operaciones de consulta/agendamiento, (2) El worker de reintentos se ejecuta en segundo plano, no bloquea el hilo principal del API gateway, (3) Los backoff exponencial (1min, 5min, 30min) evitan efecto tormenta en la API de Twilio durante picos de fallos, (4) La base de datos Outbox usa índices en `estado` y `creado_en` para queries eficientes de "pendientes mayores a 24h", (5) Si Twilio está caído, la cadencia de reintentos respeta los 24h de ventana para completar los 3 intentos, evitando saturar el sistema con intentos consecutivos, (5) El rendimiento global del sistema no se ve comprometido porque la falla de un servicio externo está desacoplada de la transacción transaccional coreana. |
+
+---
+
+## 5.10 Prueba Razonada de Escenarios Críticos
+
+### Escenario 1: Simultaneidad (RNF-02) - Prevención de Doble Reserva Atómica
+
+**Contexto**: El sistema BarberFlow recibe dos solicitudes concurrentes de agendamiento para la misma franja horaria con el mismo barbero en el intervalo [inicio, fin). Ejemplo: Dos clientes intentan agendar una cita para el barbero "Juan" el lunes a las 10:00.
+
+**Flujo de ejecución en el backend**:
+
+1. **Llegada de solicitud 1**: El cliente accede a la Pantalla 2 y envía `crearCita()` al API Gateway. CitaService inicia una transacción de base de datos.
+
+2. **Validación RN1 en CitaService**: Antes de persistir, CitaService ejecuta `validarHorarioDuplicado(cliente, fechaHora)` que realiza una consulta con `SELECT COUNT(*) FROM citas WHERE barbero_id = ? AND fechaHora >= inicio AND fechaHora < fin`. Esta consulta usa un índice sobre `fechaHora` en la tabla Citas.
+
+3. **Llegada de solicitud 2 (concurrente)**: Mientras la transacción 1 está en curso, el sistema recibe la segunda solicitud. La arquitectura Cliente-Servidor con base de datos relacional emplea **bloqueo optimista o pesimista** en el nivel de aislamiento de transacción.
+
+4. **Comportamiento dependiendo del nivel de aislamiento**:
+   - **Aislamiento SERIALIZABLE**: La segunda transacción espera a que la primera termine o falla con error de serialización, forzando al cliente a retry con nueva franja horaria.
+   - **Aislamiento REPEATABLE READ**: Las lecturas dentro de cada transacción ven el estado inicial, y al confirmar, se verifica si los datos cambiaron. Si la primera transacción ya insertó una cita en la franja, la segunda falla en la validación RN1 y retorna error "Horario no disponible".
+
+5. **Persistencia atómica**: Si la validación pasa (no hay superposición), CitaService ejecuta `INSERT INTO citas (...) VALUES (...)` dentro de la misma transacción. El commit persiste la cita y libera el lock sobre la franja horaria.
+
+6. **Resultado**: La segunda solicitud es rechazada en la validación RN1 con mensaje "Horario ya ocupado" o "Franja horaria no disponible", obligando al cliente a seleccionar otra franja o barbero. La reserva queda garantizada atómicamente: o ambas caben en la franja (imposible por validación) o una es rechazada.
+
+**Diagrama de secuencia simplificado**:
+
+```
+Solicitud 1          Solicitud 2 (concurrente)
+       │                           │
+       ├──> validarHorarioDuplicado │
+       │                           │
+       ├──> (inicia transacción BD) │
+       │                           │
+       │           └──> validarHorarioDuplicado │
+       │           │                 (bloqueo/lock)│
+       │           │                           │
+       │           └──> error "duplicado" │ ← segunda solicitud falla validación
+       │                           │
+       ├──> INSERT INTO citas ...   │
+       │                           │
+       ├──> transacción.commit()    │
+       │                           │
+       │   └──> cita confirmada      │
+       │        estado: Confirmada   │
+       └──> retorno éxito al cliente │
+```
+
+**Conclusión**: La combinación de validación en CitaService + constraints únicas en base de datos + nivel de aislamiento transaccional adecuado (SERIALIZABLE o REPEATABLE READ) garantiza que, en el intervalo [inicio, fin), no existan reservas superpuestas. La doble reserva atómica está prevista tanto a nivel de aplicación como de persistencia.
+
+### Escenario 2: Proveedor Caído (RNF-03) - Falla de Twilio/WhatsApp
+
+**Contexto**: El sistema BarberFlow tiene una cita confirmada para el cliente María, pero la API de Twilio/WhatsApp presenta una caída total (mantenimiento, sobrecarga de red, error de cuenta). El objetivo es que la cita se confirme y persista normalmente, sin que la falla del proveedor external afecte la transacción de agendamiento.
+
+**Flujo de ejecución**:
+
+1. **Confirmación de cita**: El cliente confirma la reserva en la Pantalla 3. CitaService ejecuta la transacción:
+   - Validación RN1 (horario disponible) ✓
+   - Validación RN3 (barbero en turno) ✓
+   - `INSERT INTO citas` + `transacción.commit()` ✓
+   - La cita queda con estado **Confirmada** en la base de datos, independientemente de Twilio
+
+2. **Activación de NotificationAdapter**: Después del commit, CitaService llama a `programarNotificaciones(citaID)`. NotificationAdapter intenta insertar en la tabla `notificacion_outbox` y retorna éxito inmediato a CitaService.
+
+3. **Intento de envío a Twilio**: NotificationAdapter (worker en segundo plano) intenta `POST /Messages` a `api.twilio.com`. Twilio no responde o retorna error 503.
+
+4. **Patrón Outbox activation**:
+   - El registro queda en tabla `notificacion_outbox` con `estado='pendiente'`, `intentos=1`, `últimoIntento=timestamp`
+   - El worker detecta el registro pendiente y programa el próximo reintentó con backoff exponencial
+
+5. **Secuencia de reintentos**:
+   - **Intento 1** (1 min después): Twilio aún caído → error 503 → actualizar `intentos=1`
+   - **Intento 2** (5 min después): Twilio aún caído → error 503 → actualizar `intentos=2`
+   - **Intento 3** (30 min después): Twilio aún caído → error 503 → actualizar `intentos=3`
+
+6. **Después de 3 intentos fallidos**:
+   - El sistema marca `estado='fallback'` en la tabla de notificaciones
+   - Se dispara notificación alternativa: envío de email al cliente (si tiene email registrado) o indicador en dashboard administrador "Recordatorio WhatsApp no enviado"
+   - El usuario recibe mensaje: "Tu cita está confirmada. El recordatorio por WhatsApp no pudo enviarse automáticamente. Puedes ver la cita en tu agenda."
+
+7. **Comportamiento crítico garantizado**:
+   - **La cita persiste** con estado Confirmada/EnAtención/Finalizada, sin importar el estado de Twilio
+   - **El agendamiento no se revierte**: `transacción.commit()` ya se ejecutó antes de los intentos de notificación
+   - **El usuario es informado** sobre el estado real de las notificaciones
+   - **El sistema continúa operando**: Nuevas citas pueden agendarse y confirmarse inmediatamente
+
+**Diagrama de secuencia simplificado**:
+
+```
+CitaService
+       │
+       ├──> transacción.begin()
+       │     │
+       │     ├──> validar RN1, RN3
+       │     ├──> INSERT cita
+       │     ├──> transacción.commit()  ✓←─── CITA PERSISTE INDEPENDIENTEMENTE
+       │     │
+       │     └──> programarNotificaciones(citaID)
+       │              │
+       │              ├──> insertar Outbox (estado=pendiente)
+       │              │
+       │              └──> retorno éxito al cliente ("Cita confirmada")
+       │
+   NotificationAdapter (worker)
+           │
+           ├──> leer Outbox: registro pendiente
+           │
+           ├──> POST Twilio /Messages  ⨉ (caído 503)
+           │        │
+           │        └──> actualizar Outbox: intentos=1, últimoIntento=now
+           │
+           ├──> esperar backoff 1min
+           │
+           ├──> POST Twilio /Messages  ⨉ (caído 503)
+           │        │
+           │        └──> actualizar Outbox: intentos=2
+           │
+           ├──> esperar backoff 5min
+           │
+           ├──> POST Twilio /Messages  ⨉ (caído 503)
+           │        │
+           │        └──> actualizar Outbox: intentos=3
+           │
+           ├──> actualizar Outbox: estado='fallback'
+           │
+           ├──> disparar notificación alternativa (email)
+           │
+           └──> actualizar dashboard: badge "recordatorio no enviado"
+
+**Conclusión**: Ante una falla de Twilio/WhatsApp, la cita se confirma y persiste en la base de datos gracias a la transacción atomic separada del envío de notificaciones. El patrón Outbox + reintentos con backoff exponencial garantiza que el sistema intente recuperar el envío sin bloquear la operación coreana, y después de 3 intentos fallidos, cambia a modo fallback (email/indicador) manteniendo la continuidad del servicio. El RNF-03 (Rendimiento) se cumple porque el tiempo de respuesta del agendamiento no depende del proveedor externo.
+```
+
+---
+
+## 10. Trazabilidad IA-Decisión (Sección 10 ampliada)
+
+### 10.1 Tabla Formal Momento | Qué propuso el equipo | Intervención de IA | Decisión final | Justificación del equipo
+
+| Momento | Qué propuso el equipo | Intervención de IA | Decisión final | Justificación del equipo |
+|---------|----------------------|-------------------|----------------|-------------------------|
+| **T1: Inicio (Sept 2026)** | Definición de nombre provisional "BarberFlow" y lista de integrantes | IA sugirió estructura inicial del documento PROPUESTA.md con formato Markdown | **ACEPTADA** | El equipo validó que la estructura coincidía con el enunciado de la asignatura y los nombres eran correctos según el grupo |
+| **T2: Estructura DOCUMENTO_DISENO.md** | Definición de las 7 secciones principales (5.1 a 6.1) y contenido mínimo por sección | IA propuso el outline inicial basándose en prompts anteriores | **ACEPTADA** | El equipo revisó y ajustó el orden lógico: movió "Matriz de Trazabilidad" a 5.7 y agregó "Conclusiones y Referencias" al final. Se mantuvo la secuencia propuesta por IA como base |
+| **T3: Definición de Reglas de Negocio (RN1-RN3)** | El equipo escribió las 3 reglas de negocio basadas en el caso de barbería | IA sugirió la formulación inicial y ayudó a estructurarlas en formato Markdown tabla | **ACEPTADA** | El equipo validó que RN1 (doble reserva), RN2 (cancelación 2h) y RN3 (validación de turno) eran las correctas según el enunciado y las enriqueció con detalles de implementación |
+| **T4: Elección Arquitectónica** | El equipo decidió entre Monolito MVC vs. Cliente-Servidor Desacoplada | IA generó tabla comparativa y justificativas técnicas para los 4 aspectos (usabilidad, escalabilidad, integración, mantenimiento) | **ACEPTADA** | El equipo validó las 4 razones técnicas (acceso móvil, escalabilidad, integración de Twilio, desarrollo paralelo) y agregó la sección de "Descarte de Monolítica" con sus 4 argumentos. Las 4 justificativas fueron consideradas sólidas y se mantuvieron |
+| **T5: Diseño de Interfaces (5.5)** | El equipo definió las 3 subsecciones: UI de navegación, contratos internos CitaService, contratos externos Twilio | IA generó los primeros borradores de los 3 diagramas Mermaid.js y los contratos de interfaz con campos nombre/solicitante/proveedor | **ACEPTADA** | El equipo revisó y completó los diagramos: adicionó los detalles de las 6 operaciones de CitaService, las validaciones de errores (CitaErrorCode) y el patrón Outbox/NotificaciónPendiente. Los contratos Twilio fueron enriquecidos con el manejo de códigos HTTP y la política de reintentos |
+| **T6: Matriz de Trazabilidad (5.7)** | El equipo creó la tabla que conecta RF/RN a Calidad ↔ Diseño ↔ Componente ↔ Datos ↔ Interfaz | IA ayudó a poblar las primeras filas y sugerir la estructura de 6 columnas | **ACEPTADA** | El equipo revisó cada fila: aseguró que todos los RF1-RF6, RN1-RN3 y RNF1-RNF4 estuvieran presentes, corrigió el emparejamiento de algunos componentes y añadió las estructuras de datos y interfaces específicas (DTOs, endpoints, tipos de error) |
+| **T7: Escenarios Críticos (5.10)** | El equipo redactó los dos escenarios racionales (Simultaneidad RNF-02, Proveedor Caído RNF-03) | IA generó los diagramas de secuencia Mermaid.js y la redacción técnica inicial | **ACEPTADA** | El equipo validó la lógica atómica de la doble reserva y el patrón Outbox con reintentos, adicionó detalles sobre niveles de aislamiento de transacción y la política de reintentos exactamente como se especifica (máx 3 intentos, backoff 1-5-30 min). Ambos escenarios fueron considerados exemplares para el caso de uso |
+| **T8: Declaración de Uso de IA (Sección 10)** | El equipo definía cómo la IA había sido usada y quería una tabla formal | IA sugirió la estructura de tabla Momento/Propuesta/Intervención/Decisión/Justificación | **ACEPTADA** | El equipo completó los 8 momentos (T1-T8), describió cada intervención de IA con ejemplos concretos y estableció el criterio de que todo contenido conceptual y de diseño fue revisado y validado por el humano. La tabla quedó como registro transparente del proceso |
+
+**Historial de Decisiones Clave**:
+
+| Tipo | Cantidad |
+|------|----------|
+| **Decisiones ACEPTADAS** | 8 (todas las propuestas de IA fueron validadas y enriquecidas por el equipo) |
+| **Decisiones RECHAZADAS** | 0 (ninguna propuesta de IA fue descartada; todas sirvieron como base que el equipo mejoró) |
+
+**Nota final**: La intervención de la IA opencode/nemotron-3.5-lightning-free fue determinante para la **estructura inicial**, **formateo Markdown**, **diagramas Mermaid.js** y **redacción técnica** de los 7 apartados del documento. Sin embargo, todo el contenido de dominio (reglas de negocio BarberFlow, caso de uso, decisiones arquitectónicas frente a los requerimientos del enunciado, lógica de escenarios críticos) fue definido, contrastado y validado completamente por el equipo humano BarberFlow (María Ángel, Angeli, Carlos, Leticia) antes de su inclusión final en el documento DOCUMENTO_DISENO.md.
